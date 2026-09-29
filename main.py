@@ -8,14 +8,22 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 app = typer.Typer()
-config_file_path=Path.home()/".bmecloud_config.json"
-SERVICE_NAME="bme_cloud_tool"
+config_file_path=Path.home()/".circle_cli_config.json"
+SERVICE_NAME="circle_cli_tool"
 
 MAXIMUM_ATTEMPTS=3
 
 class Szerver(str,Enum):
     fured="fured"
     smallville="smallville"
+class Operation(str,Enum):
+    sleep="sleep"
+    wake_up="wake_up"
+    reboot="reboot"
+    reset="reset"
+    renew="renew"
+    shutdown="shutdown"
+    shut_off="shut_off"
 def get_config()->dict:
     if not config_file_path.exists(): return dict()
     with open(config_file_path,"r+") as conf:
@@ -91,7 +99,7 @@ def auth(
 ):
     jelszo = typer.prompt(f"Add meg a jelszót a(z) {username} fiókhoz", hide_input=True)
     try :
-        keyring.set_password("bme_cloud_tool", str(username), str(jelszo))
+        keyring.set_password(SERVICE_NAME, str(username), str(jelszo))
     except Exception as e:
         print("Hiba történt a tárolás során!")
         return
@@ -120,28 +128,6 @@ def store(
     id: int = typer.Argument(help="A gép azonosítója")
 ):
     storeNamedVM(name, szerver, id)
-@app.command()
-def wake_up(
-    name:str=typer.Argument(None, help="A VM lementett szerver neve"),
-    szerver: Szerver = typer.Option(None, "--szerver", "-s"),
-    id: int = typer.Option(None, "--id", "-i", help="A gép azonosítója"),
-    force_fetch: bool = typer.Option(False, "--force-fetch", "-f", help="Mindenképp fetcheli a cookie-kat")
-    
-):
-    szerver_t,id_t,success=parseVM(name,szerver,id)
-    if not success: return
-    perfom_op(szerver_t,id_t,force_fetch,0,"wake_up")
-@app.command()
-def sleep(
-    name:str=typer.Argument(None, help="A VM lementett szerver neve"),
-    szerver: Szerver = typer.Option(None, "--szerver", "-s"),
-    id: int = typer.Option(None, "--id", "-i", help="A gép azonosítója"),
-    force_fetch: bool = typer.Option(False, "--force-fetch", "-f", help="Mindenképp fetcheli a cookie-kat")
-):
-    szerver_t,id_t,success=parseVM(name,szerver,id)
-    if not success: return
-    perfom_op(szerver_t,id_t,force_fetch,0,"sleep")
-    
 def parseVM(name:str, backup_server:Szerver, backup_id:int)->(tuple[Szerver,int,bool]|None):
     szerver=backup_server
     id=backup_id
@@ -196,6 +182,7 @@ def fetch_cookies(s:Szerver)->dict:
             print(session_cookies.keys)
         return session_cookies
 def perfom_op(s:Szerver, id:int, force_fetch:bool=False, retries:int=0, op_code:str=""):
+    print("Performing operation: "+op_code)
     if retries>=MAXIMUM_ATTEMPTS:
         print("Something went really wrong (rec_depth exceeded), aborting...")
         return
@@ -215,7 +202,6 @@ def perfom_op(s:Szerver, id:int, force_fetch:bool=False, retries:int=0, op_code:
             print("Auth failed")
             return
         storeCookies(s,cookies)
-    print("Performing operation")
     result=op_post(cookies, s, id,op_code=op_code)
     match (result):
         case 200:
@@ -237,3 +223,15 @@ def op_post(session_cookies:dict, s:Szerver, id:int, op_code:str):
     response=requests.post(origin_url+"op/"+op_code+"/",headers=headers,cookies=session_cookies)
     if response.text.find("CSRF verification failed")!=-1: return 99
     return response.status_code
+
+@app.command()
+def do(
+    op_code:Operation=typer.Argument(...,help="Végezni kívánt operáció"),
+    name:str=typer.Argument(None, help="A VM lementett szerver neve"),
+    szerver: Szerver = typer.Option(None, "--szerver", "-s"),
+    id: int = typer.Option(None, "--id", "-i", help="A gép azonosítója"),
+    force_fetch: bool = typer.Option(False, "--force-fetch", "-f", help="Mindenképp fetcheli a cookie-kat")
+):
+    szerver_t,id_t,success=parseVM(name,szerver,id)
+    if not success: return
+    perfom_op(szerver_t,id_t,force_fetch,0,op_code.value)
